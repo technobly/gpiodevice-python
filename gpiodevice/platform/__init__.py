@@ -1,6 +1,6 @@
-from . import alienware, pi, radxa
+from . import alienware, pi, radxa, particle_tachyon
 
-PLATFORMS = (pi, alienware, radxa)
+PLATFORMS = (pi, alienware, radxa, particle_tachyon)
 
 
 def get_gpiochip_labels():
