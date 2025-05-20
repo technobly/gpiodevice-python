@@ -18,7 +18,7 @@ friendly_errors: bool = False
 
 
 @errors.collect
-def check_pins_available(chip: gpiod.Chip, pins, fatal: bool = True) -> bool:
+def check_pins_available(chip: gpiod.chip, pins, fatal: bool = True) -> bool:
     """Check if a list of pins are in use on a given gpiochip device.
 
     If any pins are used: raises a helpful list of pins and their consumer if fatal == True, otherwise returns False.
@@ -62,19 +62,19 @@ def find_chip_by_label(labels: (list[str], tuple[str], str), pins: dict[str, (in
         labels = (labels,)
 
     for path in glob.glob(CHIP_GLOB):
-        if gpiod.is_gpiochip_device(path):
-            try:
-                label = gpiod.Chip(path).get_info().label
-            except PermissionError:
-                yield errors.GPIOError(f"{path}: Permission error!")
-                continue
+        # if gpiod.is_gpiochip_device(path):
+        try:
+            label = gpiod.chip(path).label
+        except PermissionError:
+            yield errors.GPIOError(f"{path}: Permission error!")
+            continue
 
-            if re.match("|".join(labels), label):
-                chip = gpiod.Chip(path)
-                if check_pins_available(chip, pins):
-                    return chip
-            else:
-                yield errors.GPIONotFound(f"{path}: this is not the GPIO we're looking for! ({label})")
+        if re.match("|".join(labels), label):
+            chip = gpiod.chip(path)
+            if check_pins_available(chip, pins):
+                return chip
+        else:
+            yield errors.GPIONotFound(f"{path}: this is not the GPIO we're looking for! ({label})")
 
     if fatal:
         raise errors.ErrorDigest("suitable gpiochip device not found!")
@@ -103,38 +103,38 @@ def find_chip_by_pins(pins: (list[str], tuple[str], str), ignore_claimed: bool =
             pins = (pins,)
 
     for path in glob.glob(CHIP_GLOB):
-        if gpiod.is_gpiochip_device(path):
-            try:
-                chip = gpiod.Chip(path)
-            except PermissionError:
-                yield errors.GPIOError(f"{path}: Permission error!")
+        # if gpiod.is_gpiochip_device(path):
+        try:
+            chip = gpiod.chip(path)
+        except PermissionError:
+            yield errors.GPIOError(f"{path}: Permission error!")
+            continue
+
+        label = chip.label
+        failed = False
+
+        for pin_id in pins:
+            if isinstance(pin_id, int):
+                failed = True
+                yield errors.GPIOError(f'{path}: {pin_id} is an int and has been skipped, did you mean "PIN{pin_id}" or "GPIO{pin_id}"?')
                 continue
 
-            label = chip.get_info().label
-            failed = False
+            try:
+                offset = chip.line_offset_from_id(pin_id)
+                yield errors.GPIOFound(f"{pin_id}: (line {offset}) found - {path} ({label})!")
+            except OSError:
+                failed = True
+                yield errors.GPIONotFound(f"{pin_id}: not found - {path} ({label})!")
+                continue
 
-            for pin_id in pins:
-                if isinstance(pin_id, int):
-                    failed = True
-                    yield errors.GPIOError(f'{path}: {pin_id} is an int and has been skipped, did you mean "PIN{pin_id}" or "GPIO{pin_id}"?')
-                    continue
+            line_info = chip.get_line_info(offset)
 
-                try:
-                    offset = chip.line_offset_from_id(pin_id)
-                    yield errors.GPIOFound(f"{pin_id}: (line {offset}) found - {path} ({label})!")
-                except OSError:
-                    failed = True
-                    yield errors.GPIONotFound(f"{pin_id}: not found - {path} ({label})!")
-                    continue
+            if not ignore_claimed and line_info.used:
+                failed = True
+                yield errors.GPIOError(f"{pin_id}: (line {offset}, {line_info.name}) currently claimed by {line_info.consumer}")
 
-                line_info = chip.get_line_info(offset)
-
-                if not ignore_claimed and line_info.used:
-                    failed = True
-                    yield errors.GPIOError(f"{pin_id}: (line {offset}, {line_info.name}) currently claimed by {line_info.consumer}")
-
-            if not failed:
-                return chip
+        if not failed:
+            return chip
 
     if fatal:
         raise errors.ErrorDigest("suitable gpiochip not found!")
